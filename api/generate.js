@@ -29,7 +29,7 @@ Respond ONLY with a valid JSON array of exactly ${cardCount} items. No preamble,
 
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -46,8 +46,12 @@ Respond ONLY with a valid JSON array of exactly ${cardCount} items. No preamble,
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Gemini error:", data);
-      return res.status(502).json({ error: "Gemini API error", detail: data });
+      console.error("Gemini error:", JSON.stringify(data));
+      return res.status(502).json({
+        error: "Gemini API error",
+        status: response.status,
+        detail: data?.error?.message || JSON.stringify(data),
+      });
     }
 
     const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
