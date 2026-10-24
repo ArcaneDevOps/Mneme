@@ -75,7 +75,7 @@ async function generateFlashcards(text, courseName, cardCount) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "Generation failed");
+    throw new Error(err.detail || err.error || "Generation failed");
   }
   const data = await res.json();
   return data.cards;
