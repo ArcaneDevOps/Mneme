@@ -27,10 +27,107 @@ async function extractTextFromPdf(file) {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items.map((item) => item.str).join(" ");
-    fullText += `\n${pageText}`;
+    fullText += "\n" + content.items.map((item) => item.str).join(" ");
   }
   return fullText.trim();
+}
+
+// ── Supabase config ───────────────────────────────────────────────────
+const SUPABASE_URL = "https://mtlpoqemyjbzqnsoaemw.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10bHBvcWVteWpienFuc29hZW13Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5NjgyNTEsImV4cCI6MjEwODU0NDI1MX0.AwdogVuXvOQbM-Ig820R_nx9EqRpLbhxOA5roG7TAnQ";
+
+const db = {
+  async query(table, method, body) {
+    const url = `${SUPABASE_URL}/rest/v1/${table}`;
+    const headers = {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      "Prefer": "return=representation",
+    };
+    const res = await fetch(method === "GET" ? `${url}?${body}` : url, {
+      method,
+      headers,
+      body: method !== "GET" ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async getCourses(deviceId) {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/courses?device_id=eq.${deviceId}&order=created_at.asc`,
+      { headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` } }
+    );
+    return res.json();
+  },
+
+  async addCourse(deviceId, name) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/courses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}`, "Prefer": "return=representation" },
+      body: JSON.stringify({ device_id: deviceId, name }),
+    });
+    const data = await res.json();
+    return data[0];
+  },
+
+  async deleteCourse(deviceId, name) {
+    await fetch(`${SUPABASE_URL}/rest/v1/courses?device_id=eq.${deviceId}&name=eq.${encodeURIComponent(name)}`, {
+      method: "DELETE",
+      headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` },
+    });
+  },
+
+  async getCards(deviceId, course) {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/flashcards?device_id=eq.${deviceId}&course=eq.${encodeURIComponent(course)}&order=created_at.asc`,
+      { headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` } }
+    );
+    return res.json();
+  },
+
+  async getAllCards(deviceId) {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/flashcards?device_id=eq.${deviceId}&order=created_at.asc`,
+      { headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` } }
+    );
+    return res.json();
+  },
+
+  async addCards(deviceId, course, cards) {
+    const rows = cards.map((c) => ({ device_id: deviceId, course, question: c.question, answer: c.answer }));
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/flashcards`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}`, "Prefer": "return=representation" },
+      body: JSON.stringify(rows),
+    });
+    return res.json();
+  },
+
+  async deleteCard(id) {
+    await fetch(`${SUPABASE_URL}/rest/v1/flashcards?id=eq.${id}`, {
+      method: "DELETE",
+      headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` },
+    });
+  },
+
+  async deleteCourseCards(deviceId, course) {
+    await fetch(`${SUPABASE_URL}/rest/v1/flashcards?device_id=eq.${deviceId}&course=eq.${encodeURIComponent(course)}`, {
+      method: "DELETE",
+      headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${SUPABASE_ANON_KEY}` },
+    });
+  },
+};
+
+// ── Device ID ─────────────────────────────────────────────────────────
+function getDeviceId() {
+  let id = localStorage.getItem("mneme_device_id");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("mneme_device_id", id);
+  }
+  return id;
 }
 
 // ── Colors ────────────────────────────────────────────────────────────
@@ -44,29 +141,7 @@ const COLORS = [
 ];
 function getCourseColor(i) { return COLORS[i % COLORS.length]; }
 
-// ── localStorage ──────────────────────────────────────────────────────
-const STORAGE_KEYS = { courses: "mneme_courses", cards: "mneme_cards" };
-
-function loadFromStorage() {
-  try {
-    const courses = JSON.parse(localStorage.getItem(STORAGE_KEYS.courses)) || ["Uncategorized"];
-    const cards = JSON.parse(localStorage.getItem(STORAGE_KEYS.cards)) || { Uncategorized: [] };
-    return { courses, cards };
-  } catch {
-    return { courses: ["Uncategorized"], cards: { Uncategorized: [] } };
-  }
-}
-
-function saveToStorage(courses, cards) {
-  try {
-    localStorage.setItem(STORAGE_KEYS.courses, JSON.stringify(courses));
-    localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify(cards));
-  } catch (e) {
-    console.warn("localStorage save failed:", e);
-  }
-}
-
-// ── Gemini API call via our backend ───────────────────────────────────
+// ── Gemini via backend ────────────────────────────────────────────────
 async function generateFlashcards(text, courseName, cardCount) {
   const res = await fetch("/api/generate", {
     method: "POST",
@@ -104,23 +179,58 @@ function FlashCard({ card, index }) {
 
 // ── App ───────────────────────────────────────────────────────────────
 export default function App() {
-  const saved = loadFromStorage();
-  const [courses, setCourses] = useState(saved.courses);
-  const [cardsByCourse, setCardsByCourse] = useState(saved.cards);
-  const [activeCourse, setActiveCourse] = useState("Uncategorized");
+  const deviceId = getDeviceId();
+  const [courses, setCourses] = useState([]);
+  const [cardsByCourse, setCardsByCourse] = useState({});
+  const [activeCourse, setActiveCourse] = useState(null);
   const [view, setView] = useState("home");
   const [inputText, setInputText] = useState("");
-  const [targetCourse, setTargetCourse] = useState("Uncategorized");
+  const [targetCourse, setTargetCourse] = useState("");
   const [newCourseName, setNewCourseName] = useState("");
   const [cardCount, setCardCount] = useState(10);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [appLoading, setAppLoading] = useState(true);
   const [error, setError] = useState("");
   const [studyIndex, setStudyIndex] = useState(0);
   const [studyMode, setStudyMode] = useState(false);
   const fileRef = useRef();
 
-  useEffect(() => { saveToStorage(courses, cardsByCourse); }, [courses, cardsByCourse]);
+  // Load courses and cards from Supabase on mount
+  useEffect(() => {
+    async function loadData() {
+      setAppLoading(true);
+      try {
+        const [fetchedCourses, allCards] = await Promise.all([
+          db.getCourses(deviceId),
+          db.getAllCards(deviceId),
+        ]);
+
+        // Always ensure Uncategorized exists
+        const courseNames = fetchedCourses.map((c) => c.name);
+        if (!courseNames.includes("Uncategorized")) {
+          await db.addCourse(deviceId, "Uncategorized");
+          courseNames.unshift("Uncategorized");
+        }
+
+        setCourses(courseNames);
+        setTargetCourse(courseNames[0]);
+
+        const grouped = {};
+        courseNames.forEach((name) => { grouped[name] = []; });
+        allCards.forEach((card) => {
+          if (grouped[card.course]) grouped[card.course].push(card);
+          else grouped[card.course] = [card];
+        });
+        setCardsByCourse(grouped);
+      } catch (e) {
+        console.error("Load error:", e);
+      } finally {
+        setAppLoading(false);
+      }
+    }
+    loadData();
+  }, []);
 
   const totalCards = Object.values(cardsByCourse).reduce((s, c) => s + c.length, 0);
 
@@ -143,12 +253,14 @@ export default function App() {
     e.target.value = "";
   };
 
-  const addCourse = () => {
+  const addCourse = async () => {
     const name = newCourseName.trim();
     if (!name || courses.includes(name)) return;
+    await db.addCourse(deviceId, name);
     setCourses((c) => [...c, name]);
     setCardsByCourse((prev) => ({ ...prev, [name]: [] }));
-    setNewCourseName(""); setTargetCourse(name);
+    setNewCourseName("");
+    setTargetCourse(name);
   };
 
   const handleGenerate = async () => {
@@ -156,21 +268,37 @@ export default function App() {
     setError(""); setLoading(true);
     try {
       const cards = await generateFlashcards(inputText, targetCourse, cardCount);
-      setCardsByCourse((prev) => ({ ...prev, [targetCourse]: [...(prev[targetCourse] || []), ...cards] }));
+      const saved = await db.addCards(deviceId, targetCourse, cards);
+      setCardsByCourse((prev) => ({ ...prev, [targetCourse]: [...(prev[targetCourse] || []), ...saved] }));
       setView("course"); setActiveCourse(targetCourse); setInputText("");
     } catch (e) {
       setError(e.message || "Something went wrong. Try again.");
     } finally { setLoading(false); }
   };
 
-  const deleteCard = (course, idx) => setCardsByCourse((prev) => ({ ...prev, [course]: prev[course].filter((_, i) => i !== idx) }));
+  const deleteCard = async (card) => {
+    await db.deleteCard(card.id);
+    setCardsByCourse((prev) => ({
+      ...prev,
+      [card.course]: prev[card.course].filter((c) => c.id !== card.id),
+    }));
+  };
 
-  const deleteCourse = (name) => {
+  const deleteCourse = async (name) => {
     if (name === "Uncategorized") return;
+    await Promise.all([db.deleteCourse(deviceId, name), db.deleteCourseCards(deviceId, name)]);
     setCourses((c) => c.filter((x) => x !== name));
     setCardsByCourse((prev) => { const next = { ...prev }; delete next[name]; return next; });
-    setActiveCourse("Uncategorized"); setView("home");
+    setActiveCourse(null); setView("home");
   };
+
+  if (appLoading) return (
+    <div style={{ minHeight: "100vh", background: "#080b14", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "16px" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "28px", color: "#f0ede8" }}>Mneme</div>
+      <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.3)", fontFamily: "'DM Sans', sans-serif", letterSpacing: "2px" }}>LOADING YOUR CARDS…</div>
+    </div>
+  );
 
   return (
     <div style={{ minHeight: "100vh", background: "#080b14", color: "#f0ede8", fontFamily: "'DM Sans', sans-serif" }}>
@@ -245,7 +373,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Slider */}
             <div style={{ marginBottom: "20px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
                 <label style={{ fontSize: "11px", letterSpacing: "1.5px", opacity: 0.5, textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif" }}>Cards to Generate</label>
@@ -283,7 +410,7 @@ export default function App() {
         )}
 
         {/* COURSE */}
-        {view === "course" && (
+        {view === "course" && activeCourse && (
           <>
             <div style={{ marginBottom: "24px" }}>
               <button onClick={() => { setView("home"); setStudyMode(false); }} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: "12px", padding: 0, marginBottom: "16px" }}>← All Courses</button>
@@ -328,9 +455,9 @@ export default function App() {
             ) : (
               <div style={{ display: "grid", gap: "14px", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
                 {(cardsByCourse[activeCourse] || []).map((card, idx) => (
-                  <div key={idx} style={{ position: "relative" }}>
+                  <div key={card.id} style={{ position: "relative" }}>
                     <FlashCard card={card} index={idx} />
-                    <button onClick={(e) => { e.stopPropagation(); deleteCard(activeCourse, idx); }} style={{ position: "absolute", top: "10px", right: "10px", background: "rgba(233,69,96,0.2)", border: "none", color: "#e94560", width: "22px", height: "22px", borderRadius: "50%", fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+                    <button onClick={(e) => { e.stopPropagation(); deleteCard(card); }} style={{ position: "absolute", top: "10px", right: "10px", background: "rgba(233,69,96,0.2)", border: "none", color: "#e94560", width: "22px", height: "22px", borderRadius: "50%", fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
                   </div>
                 ))}
                 <div onClick={() => { setTargetCourse(activeCourse); setView("generate"); }} style={{ height: "180px", border: "1px dashed rgba(255,255,255,0.15)", borderRadius: "14px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: 0.5, gap: "8px", transition: "opacity 0.2s" }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}>
