@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // Only allow POST
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -55,13 +54,20 @@ Respond ONLY with a valid JSON array of exactly ${cardCount} items. No preamble,
     }
 
     const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
-    const clean = raw.replace(/```json|```/g, "").trim();
+    console.log("Gemini raw response:", raw);
+
+    const start = raw.indexOf("[");
+    const end = raw.lastIndexOf("]");
+    if (start === -1 || end === -1) {
+      return res.status(502).json({ error: "Failed to parse Gemini response", raw });
+    }
+    const clean = raw.slice(start, end + 1).trim();
 
     let cards;
     try {
       cards = JSON.parse(clean);
-    } catch {
-      return res.status(502).json({ error: "Failed to parse Gemini response", raw });
+    } catch (parseErr) {
+      return res.status(502).json({ error: "Failed to parse Gemini response", raw, clean });
     }
 
     return res.status(200).json({ cards });
